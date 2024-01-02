@@ -64,3 +64,6 @@ def extrair_lonlat(imagem, geometria, bandas, scale=30):
     coordenadas = coordenadas.getInfo()
     
     return pd.DataFrame.from_dict(coordenadas)
+
+def correct_dummies(df, dummy_value):
+    return df.where(df != dummy_value).fillna(method="ffill", axis=1)
