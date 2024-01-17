@@ -66,4 +66,10 @@ def extrair_lonlat(imagem, geometria, bandas, scale=30):
     return pd.DataFrame.from_dict(coordenadas)
 
 def correct_dummies(df, dummy_value):
-    return df.where(df != dummy_value).fillna(method="ffill", axis=1)
+    df = df.where(df != dummy_value)
+
+    coord = df[['latitude','longitude']]
+    images = df.drop(['latitude','longitude'],axis=1)
+    images.iloc[:,0] = images.iloc[:,0].fillna(images.mean(axis=1))
+
+    return images.fillna(method='ffill',axis=1).join(coord)
