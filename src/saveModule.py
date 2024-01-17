@@ -8,8 +8,8 @@ os.environ['PROJ_LIB'] = '/path/to/env/share/proj'
 #===============================================
 def save_tiff_from_df(df,bands,dummy,path_out,coordSystem):
     #Registro das Lats/Lons
-    lat = df['Latitude'].values
-    lon = df['Longitude'].values
+    lat = df['latitude'].values
+    lon = df['longitude'].values
     
     #Determinação de algumas variáveis de interesse
     ulat = np.unique(lat)
