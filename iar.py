@@ -1,6 +1,9 @@
 import ee
 import re
+import os
 import pandas as pd
+from osgeo import gdal
+import matplotlib.pyplot as plt
 
 try:
     ee.Initialize()
@@ -79,4 +82,15 @@ renamed_df = rename_geodf(df)
 
 reorder = renamed_df.reindex(sorted(renamed_df.columns), axis=1)
 
-reorder.columns
+asset_paths = [os.path.join('assets\\', i) for i in os.listdir('assets\\')]
+
+amplitude = asset_paths[0]
+
+def show_tif(path, band):
+    raster = gdal.Open(path)
+    array = raster.GetRasterBand(band).ReadAsArray()
+    return plt.imshow(array, cmap="gray")
+
+show_tif(amplitude, 3)
+
+
