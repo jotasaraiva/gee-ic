@@ -1,16 +1,26 @@
 import ee
 import re
-import os
 import pandas as pd
-from osgeo import gdal
-import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sbn
+from rpy2.robjects.packages import importr
+from rpy2.robjects import pandas2ri
+import rpy2.robjects.numpy2ri
+import rpy2.robjects as robjects
+from sklearn.preprocessing import StandardScaler
 
+# inicializa conversão automática de objetos Python/R
+rpy2.robjects.numpy2ri.activate()
+pandas2ri.activate()
+
+# inicializa Earth Engine
 try:
     ee.Initialize()
 except:
     ee.Authenticate()
     ee.Initialize()
-    
+
+# região e intervalo de interessse
 coordenadas = "-48.534679,-22.508117,-48.50481,-22.538879"
 x1, y1, x2, y2 = coordenadas.split(",")
 
@@ -25,9 +35,7 @@ geom = ee.Geometry.Polygon([[[float(x1),float(y2)],
                              [float(x1),float(y1)],
                              [float(x1),float(y2)]]])
 
-latitude_central = (float(x1)+float(x2))/2
-longitude_central = (float(y1)+float(y2))/2
-
+# coleta de imagens
 sentinel1 = ee.ImageCollection('COPERNICUS/S1_GRD')\
     .filterBounds(geom)\
     .filterDate(inicio,fim)\
@@ -38,13 +46,14 @@ sentinel1 = ee.ImageCollection('COPERNICUS/S1_GRD')\
 v_emit_asc = sentinel1.filter(ee.Filter.eq('orbitProperties_pass', 'ASCENDING'))
 v_emit_desc = sentinel1.filter(ee.Filter.eq('orbitProperties_pass', 'DESCENDING'))
 
+# funções de amplitude e transformação em DF
 def add_amplitude(image, VV = "VV", VH = "VH"):
     amplitude = image\
         .expression('(VV ** 2 + VH ** 2) ** (1 / 2)', {'VV':image.select(VV), 'VH':image.select(VH)})\
         .rename('amplitude')
     return image.addBands(amplitude)
 
-def ee_to_pandas(imagem, geometria, bandas, scale=30):
+def ee_to_pandas(imagem, geometria, bandas, scale):
     imagem = imagem.addBands(ee.Image.pixelLonLat())
     
     coordenadas = imagem.select(["longitude","latitude"] + bandas)\
@@ -62,6 +71,7 @@ image_names = image.bandNames().getInfo()
 
 df = ee_to_pandas(image, geom, image_names, scale=10)
 
+# funções para reordenar cronologicamente
 def extract_date_string(input_string):
     pattern = r'(\d{8})(?=[a-zA-Z])'
     input_string.replace("_", " ")
@@ -82,20 +92,46 @@ renamed_df = rename_geodf(df)
 
 reorder = renamed_df.reindex(sorted(renamed_df.columns), axis=1)
 
-asset_paths = [os.path.join('assets\\', i) for i in os.listdir('assets\\')]
+# extraindo um pixel em série temporal
+scale = StandardScaler()
 
-amplitude = asset_paths[0]
+x = reorder\
+    .drop(['latitude','longitude'], axis=1)\
+    .iloc[0,:]
 
-def show_tif(path, band):
-    raster = gdal.Open(path)
-    array = raster.GetRasterBand(band).ReadAsArray()
-    return plt.imshow(array, cmap="gray")
+astsa = importr('astsa')
+base = importr('base')
+stats = importr('stats')
 
-show_tif(amplitude, 3)
+x = base.scale(np.reshape(np.array(x), (-1, 1)))
 
-vec = reorder\
-    .drop(['latitude','longitude'], axis = 1)\
-    .iloc[0,:]\
-    .tolist()
+# função de envelope espectral
+def get_specenv(x, *args): 
+    scaled_time_series = stats.ts(robjects.FloatVector(list(x))).ravel()
+    arrays = [i(scaled_time_series) for i in args]
+    arrays.insert(0, scaled_time_series)
+    arrays = np.stack(arrays, axis=1)
 
-vec
+    spec_env = astsa.specenv(arrays, real=True, plot=False)
+    num_coefs = spec_env[:,2:].shape[1]
+    names_col = ['frequency', 'specenv'] + [f"coef{i}" for i in range(1, num_coefs+1)]
+    
+    return pd.DataFrame(spec_env, columns=names_col)
+
+spec_env = get_specenv(x, np.abs, np.square)
+
+# extrair melhores coeficientes
+beta = spec_env[spec_env.specenv == spec_env.specenv.max()].iloc[:,2:].squeeze()
+
+# escalar coeficientes
+b = beta/beta[1]
+
+# função de otimização
+opt = lambda x: b[0]*x + b[1]*np.abs(x) + b[2]*np.square(x)
+
+# resultado da série otimizada
+res = np.concatenate([x, opt(x)], axis = 1)
+
+df_res = pd.DataFrame(res, columns = ['original', 'opt'])
+
+sbn.lineplot(df_res)
