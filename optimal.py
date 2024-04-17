@@ -9,6 +9,7 @@ from rpy2.robjects import pandas2ri
 import rpy2.robjects.numpy2ri
 import rpy2.robjects as robjects
 from sklearn.preprocessing import StandardScaler
+from datetime import datetime
 
 # inicializa conversão automática de objetos Python/R
 rpy2.robjects.numpy2ri.activate()
@@ -163,5 +164,8 @@ final_test = np.concatenate(
 
 sbn.lineplot(final_test)
 
-
+startTime = datetime.now()
+print(datetime.now() - startTime)
+novo_df = scaled_df.apply(lambda x: optimize(x, np.abs, np.square), axis=1)
+print(datetime.now() - startTime)
 
