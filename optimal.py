@@ -2,6 +2,7 @@ import ee
 import re
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 import seaborn as sbn
 from rpy2.robjects.packages import importr
 from rpy2.robjects import pandas2ri
@@ -124,7 +125,7 @@ spec_env = get_specenv(x, np.abs, np.square)
 beta = spec_env[spec_env.specenv == spec_env.specenv.max()].iloc[:,2:].squeeze()
 
 # escalar coeficientes
-b = beta/beta[1]
+b = beta
 
 # função de otimização
 opt = lambda x: b[0]*x + b[1]*np.abs(x) + b[2]*np.square(x)
@@ -135,3 +136,32 @@ res = np.concatenate([x, opt(x)], axis = 1)
 df_res = pd.DataFrame(res, columns = ['original', 'opt'])
 
 sbn.lineplot(df_res)
+
+names = list(reorder.drop(['latitude','longitude'], axis=1).columns)
+
+scaled = scale.fit_transform(reorder.drop(['latitude','longitude'], axis=1).values.T).T
+
+scaled_df = pd.DataFrame(scaled, columns=names)
+
+def optimize(x, *args):
+    if type(x) == pd.core.series.Series:
+        x = np.array(x)
+    arr = list(x.flatten())
+    arrays = [arr] + [list(i(arr)) for i in args]
+    mat = np.array(arrays).T
+    spec_env = astsa.specenv(mat, real=True, plot=False)
+    beta = spec_env[spec_env[:,1]==max(spec_env[:,1]), 2:].ravel()
+    opt = lambda l: np.array([l] + [list(k(l)) for k in args]).T * beta
+    return opt(arr).sum(axis=1).reshape(-1,1)
+
+final_test = np.concatenate(
+    (np.array(scaled_df.iloc[0,:]).reshape(-1,1),
+    optimize(scaled_df.iloc[0,:], np.abs, np.square),
+    optimize(x, np.abs, np.square)),
+    axis=1
+)
+
+sbn.lineplot(final_test)
+
+
+
