@@ -10,6 +10,8 @@ import rpy2.robjects.numpy2ri
 import rpy2.robjects as robjects
 from sklearn.preprocessing import StandardScaler
 from datetime import datetime
+from src import saveModule
+from osgeo import gdal
 
 # inicializa conversão automática de objetos Python/R
 rpy2.robjects.numpy2ri.activate()
@@ -140,9 +142,11 @@ sbn.lineplot(df_res)
 
 names = list(reorder.drop(['latitude','longitude'], axis=1).columns)
 
-scaled = scale.fit_transform(reorder.drop(['latitude','longitude'], axis=1).values.T).T
+scaled_mat = scale.fit_transform(reorder.drop(['latitude','longitude'], axis=1).to_numpy())
 
-scaled_df = pd.DataFrame(scaled, columns=names)
+scaled_df = pd.DataFrame(scaled_mat, columns=names).join(df.loc[:,['latitude','longitude']])
+
+saveModule.save_tiff_from_df(scaled_df, names, 99999, r"assets/scaled.tif", "EPSG:4326")
 
 def optimize(x, *args):
     if type(x) == pd.core.series.Series:
@@ -153,19 +157,80 @@ def optimize(x, *args):
     spec_env = astsa.specenv(mat, real=True, plot=False)
     beta = spec_env[spec_env[:,1]==max(spec_env[:,1]), 2:].ravel()
     opt = lambda l: np.array([l] + [list(k(l)) for k in args]).T * beta
-    return opt(arr).sum(axis=1).reshape(-1,1)
+    return pd.Series(opt(arr).sum(axis=1))  
 
-final_test = np.concatenate(
-    (np.array(scaled_df.iloc[0,:]).reshape(-1,1),
-    optimize(scaled_df.iloc[0,:], np.abs, np.square),
-    optimize(x, np.abs, np.square)),
-    axis=1
-)
+def show_tif(path, band, palette="gray"):
+    raster = gdal.Open(path)
+    array = raster.GetRasterBand(band).ReadAsArray()
+    return plt.imshow(array, cmap=palette)
 
-sbn.lineplot(final_test)
+show_tif(r"assets/scaled.tif", 1)
 
-startTime = datetime.now()
-print(datetime.now() - startTime)
-novo_df = scaled_df.apply(lambda x: optimize(x, np.abs, np.square), axis=1)
-print(datetime.now() - startTime)
+example_pixel = scaled_df.drop(["latitude", "longitude"], axis=1).iloc[35,:]
 
+example_opt = optimize(example_pixel, np.abs, np.square)
+
+example_df = pd.DataFrame(np.vstack((example_pixel.values, example_opt.values)).T, columns = ["original", "opt"])
+
+sbn.lineplot(example_df)
+
+def map_func(row):
+    try:
+        res = optimize(row, np.abs, np.square)
+    except:
+        res = row
+    return res
+
+map_func(scaled_df.drop(["latitude", "longitude"], axis=1).iloc[35,:])
+
+start_time = datetime.now() 
+
+result = scaled_df\
+    .drop(['latitude','longitude'], axis=1)\
+    .apply(map_func, axis=1)
+
+time_elapsed = datetime.now() - start_time 
+
+print('Time elapsed (hh:mm:ss.ms) {}'.format(time_elapsed))
+
+res_image = result.join(df.loc[:,['latitude','longitude']])
+
+col_names = res_image.columns[0:31]
+
+saveModule.save_tiff_from_df(res_image, col_names, 1, r"assets/anomaly.tif", "EPSG:4326")
+
+show_tif(r"assets/anomaly.tif", 20)
+
+for i in range(1,32):
+    print(i)
+    show_tif(r"assets/anomaly.tif", i)
+    plt.show()
+    
+    
+start_time = datetime.now() 
+optimized_df = scaled_df\
+    .drop(['latitude', 'longitude'], axis=1)\
+    .apply(lambda x: optimize(x, np.abs, np.square))
+time_elapsed = datetime.now() - start_time 
+print('Time elapsed (hh:mm:ss.ms) {}'.format(time_elapsed))
+
+last_try = optimized_df.join(df.loc[:,['latitude','longitude']])
+
+spatial_test= pd.concat((last_try.iloc[:,0], scaled_df.iloc[:,0]), axis=1)\
+    .set_axis(['optimized','original'], axis=1)
+    
+sbn.lineplot(spatial_test.iloc[:, ::-1], sort=False)
+
+col_names = last_try.columns[0:31]
+
+saveModule.save_tiff_from_df(last_try, col_names, 1, r"assets/spatial-filter.tif", "EPSG:4326")
+
+for i in range(1,32):
+    print(i)
+    show_tif(r"assets/spatial-filter.tif", i)
+    plt.show()
+    
+for i in range(1,32):
+    print(i)
+    show_tif(r"assets/scaled.tif", i)
+    plt.show()
